@@ -1,0 +1,126 @@
+#include "system.h"
+
+#include "Server.h"
+#include "AmqServer.h"
+
+#include "Listener.h"
+#include "MllpV2Listener.h"
+
+#include "Log.h"
+
+static volatile bool rundown;
+
+static void doExit(int junk)
+{
+	Log::log(LOG_INFO, "Queueing exit because of signal");
+	rundown= true;
+}
+
+int main(int argc, char* argv[])
+{
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, doExit);
+	signal(SIGINT, doExit);
+
+	OpenSSL_add_all_algorithms();
+	ERR_load_crypto_strings();
+
+	activemq::library::ActiveMQCPP::initializeLibrary();
+
+	// The activemq verifier doesn't trust wildcards for whatever
+	// reason, so this is necessary to connect to SSL.  This needs
+	// to be fixed for security.
+
+	decaf::lang::System::setProperty(
+		"decaf.net.ssl.disablePeerVerification", "true");
+
+	int mllpVersion= 2;
+	int mllpPort= 2575;
+
+	char const *brokerUri= getenv("AMQ_BROKER_URI");
+	char const *brokerUser= getenv("AMQ_BROKER_USER");
+	char const *brokerPass= getenv("AMQ_BROKER_PASS");
+	char const *queue= getenv("QUEUE");
+
+	int c;
+	while ((c= getopt(argc, argv, "S:U:P:Q:")) != -1) {
+		switch (c) {
+		case 'p':
+			mllpPort= atoi(optarg);
+			if ((mllpPort < 1024) || (mllpPort > 65535)) {
+				Log::log(LOG_ERROR,
+					"MLLP port is invalid");
+				exit(1);
+			}
+			break;
+
+		case 'S':
+			brokerUri= optarg;
+			break;
+
+		case 'U':
+			brokerUser= optarg;
+			break;
+
+		case 'P':
+			brokerPass= optarg;
+			break;
+
+		case 'Q':
+			queue= optarg;
+			break;
+
+		default:
+			fprintf(stderr, "Unknown argument %c\n", optopt);
+			exit(1);
+		}
+	}
+
+	bool valid= true;
+
+	if (brokerUri == NULL) {
+		Log::log(LOG_CRITICAL, "Broker URI not specified");
+		valid= false;
+	}
+	if (brokerUser == NULL) {
+		Log::log(LOG_CRITICAL, "Broker user not specified");
+		valid= false;
+	}
+
+	if (valid) {
+   		ServerRef server= AmqServer::Create(brokerUri, brokerUser, brokerPass);
+		server->start();
+
+		ListenerRef listener= MllpV2Listener::Create(2575, server, queue);
+		listener->start();
+
+		for (rundown= false; !rundown; ) {
+			pause();
+		}
+
+		Log::log(LOG_INFO, "Stopping Listener");
+		listener->stop();
+
+		Log::log(LOG_INFO, "Stopping MQ Connection");
+		server->stop();
+	}
+
+	activemq::library::ActiveMQCPP::shutdownLibrary();
+
+	// Cleanup all the OpenSSL stuff
+	CONF_modules_unload(1);
+	EVP_cleanup();
+	CRYPTO_cleanup_all_ex_data();
+
+	// This makes openssl dump core if activemq had any SSL connections.
+	// I was trying to make a clean shutdown so valgrid output would be
+	// useful, but we don't actually need to free this since we're exiting
+	// anyway. -DAW 190310
+
+	//ERR_remove_state(0);
+
+	ERR_free_strings();
+
+	Log::log(LOG_INFO, "Normal shutdown");
+}
+
