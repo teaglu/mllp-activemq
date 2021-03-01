@@ -89,10 +89,10 @@ void Listener::connectionClosed(ConnectionRef connection)
 
 bool Listener::start()
 {
-    if (pipe(stopPipe) == -1) {
-        Log::log(LOG_ERROR,
-            "Unable to create UDP stop pipe pair: %s",
-            strerror(errno));
+	if (pipe(stopPipe) == -1) {
+		Log::log(LOG_ERROR,
+			"Unable to create UDP stop pipe pair: %s",
+			strerror(errno));
 	}
 
 

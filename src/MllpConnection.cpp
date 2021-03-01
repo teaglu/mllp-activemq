@@ -30,7 +30,7 @@ bool MllpConnection::handleData(char const *data, int dataLen)
 		char c= data[i];
 
 		switch (mllpState) {
-        case MllpState::WAIT_SB:
+		case MllpState::WAIT_SB:
 			if (c != 0x0B) {
 				Log::log(LOG_ERROR,
 					"Char received other than SB");
@@ -40,7 +40,7 @@ bool MllpConnection::handleData(char const *data, int dataLen)
 			}
 			break;
 
-        case MllpState::READ_MESSAGE:
+		case MllpState::READ_MESSAGE:
 			if (c == 0x1C) {
 				mllpState= MllpState::WAIT_CR;
 			} else if ((c == 0x0D) || ((c > 0x1F) && (c <= 0x7F))) {
@@ -53,7 +53,7 @@ bool MllpConnection::handleData(char const *data, int dataLen)
 			}
 			break;
 
-        case MllpState::WAIT_CR:
+		case MllpState::WAIT_CR:
 			if (c == 0x0D) {
 				if (handleMessage(mllpMessage.c_str())) {
 					mllpState= MllpState::WAIT_SB;

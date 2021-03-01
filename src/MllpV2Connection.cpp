@@ -88,8 +88,8 @@ void MllpV2Connection::acknowledge(AckType type)
 		nowParts.tm_min,
 		nowParts.tm_sec);
 	
-    std::string response;
-    response.append(1, 0x0B); // frame start
+	std::string response;
+	response.append(1, 0x0B); // frame start
 
 	response.append("MSG|^~\\&|");
 	response.append(toApp);
