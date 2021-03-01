@@ -1,7 +1,7 @@
 
 AC_PREREQ([2.69])
 AC_INIT([mllp-activemq], [0.9], [info@teaglu.com])
-AC_CONFIG_SRCDIR([src/mllp-activemq.cpp])
+AC_CONFIG_SRCDIR([src/main.cpp])
 AC_CONFIG_HEADERS([config.h])
 
 AM_INIT_AUTOMAKE

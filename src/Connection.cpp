@@ -12,13 +12,9 @@ Connection::~Connection()
 {
 }
 
-void Connection::start()
-{
-	self= shared_from_this();
-}
-
 void Connection::connectionClosed()
 {
 	listener->connectionClosed(shared_from_this());
 }
+
 

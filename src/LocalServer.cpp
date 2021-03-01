@@ -6,6 +6,10 @@
 
 #define QUEUE_LIMIT 8192
 
+// The LocalServer is a memory queue with file backing for permanence, not
+// a full implementation of an on-disk queue.  If this gets too large we
+// will eventually run out of memory.
+
 Entry::Entry(char const *filename, char const *message)
 {
 	this->filename= filename;
@@ -23,6 +27,9 @@ LocalServer::LocalServer(
 	this->upstream= upstream;
 
 	assert(this->upstream);
+
+	// Files are names as YYYYMMDD_HHMMSS_NNNN, where the last 4 are
+	// just a counter to keep the name unique.
 
 	nameLastTime= (time_t)0;
 	nameCounter= 1;
@@ -69,6 +76,9 @@ bool LocalServer::queue(char const *data)
 	path.append("/");
 	path.append(filename);
 
+	// We don't attempt to do anything until we're sure the message is
+	// flushed out to disk
+
 	int fd= open(path.c_str(),
 		O_WRONLY|O_CREAT|O_CLOEXEC|O_EXCL,
 		S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP);
@@ -105,6 +115,11 @@ bool LocalServer::queue(char const *data)
 		}
 
 		if (!success) {
+			// If we were able to create the file but we were unable to
+			// properly write it, try to delete it so we don't introduce
+			// bogus data.  If that's not possible because the filesystem
+			// is completely sideways - not much we can do.
+
 			if (unlink(path.c_str()) == -1) {
 				Log::log(LOG_ERROR,
 					"Unable to unlink faulty file %s: %s",
@@ -115,6 +130,8 @@ bool LocalServer::queue(char const *data)
 
 			std::lock_guard<std::mutex> permit(writerLock);
 			writerQueue.push_back(entry);
+
+			// Wake up the writer and try to push immediately
 			writerWake.notify_one();
 		}
 	}
@@ -127,6 +144,9 @@ bool LocalServer::queue(char const *data)
 
 void LocalServer::loadQueueDirectory()
 {
+	// This routine is called once at startup to load any dangling files
+	// from the last run into the memory structure.
+
 	std::list<std::string> fileList;
 
 	DIR *dir= opendir(basePath.c_str());
@@ -192,9 +212,9 @@ void LocalServer::loadQueueDirectory()
 
 void LocalServer::writerLoop()
 {
+	// Load dangling files from a previous run
 	loadQueueDirectory();
 
-	bool isRetry= false;
 	while (run) {
 		EntryRef entry;
 		{
@@ -203,12 +223,7 @@ void LocalServer::writerLoop()
 				entry= writerQueue.front();
 				writerQueue.pop_front();
 			} else {
-				if (isRetry) {
-					writerWake.wait_for(permit,
-						std::chrono::seconds(RETRY_TIMEOUT));
-				} else {
-					writerWake.wait(permit);
-				}
+				writerWake.wait(permit);
 
 				if (!writerQueue.empty()) {
 					entry= writerQueue.front();
@@ -224,7 +239,7 @@ void LocalServer::writerLoop()
 			path.append(entry->getFilename());
 
 			if (upstream->queue(entry->getMessage())) {
-				isRetry= false;
+				// Message was successfully sent, so delete the backing file
 
 				if (unlink(path.c_str()) == -1) {
 					Log::log(LOG_ERROR,
@@ -232,14 +247,16 @@ void LocalServer::writerLoop()
 						path.c_str(), strerror(errno));
 				}
 			} else {
-				isRetry= true;
-
-				std::lock_guard<std::mutex> permit(writerLock);
-				writerQueue.push_front(entry);
-
 				Log::log(LOG_WARNING,
-					"Unable to send - repushing %s to front",
-					path.c_str());
+					"Unable to send %s - waiting %d seconds to retry",
+					path.c_str(), RETRY_TIMEOUT);
+
+				{
+					std::lock_guard<std::mutex> permit(writerLock);
+					writerQueue.push_front(entry);
+				}
+
+				sleep(RETRY_TIMEOUT);
 			}
 		}
 	}

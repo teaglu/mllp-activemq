@@ -8,11 +8,10 @@ public:
 	Connection(ListenerRef listener);
 	virtual ~Connection();
 
-	virtual void start();
+	virtual void start() = 0;
 	virtual void stop() = 0;
 
 private:
-	std::shared_ptr<Connection> self;
 	ListenerRef listener;
 
 protected:

@@ -17,7 +17,7 @@ void Listener::listenLoop()
 	int sock= socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (sock == -1) {
 		Log::log(LOG_ERROR,
-			"Unable to open TCP syslog socket: %s",
+			"Unable to create a TCP socket: %s",
 			strerror(errno));
 	} else {
 		struct sockaddr_in addr;
@@ -30,15 +30,15 @@ void Listener::listenLoop()
 
 		if (bind(sock, genAddr, sizeof(addr)) == -1) {
 			Log::log(LOG_ERROR,
-				"Unable to bind to TCP syslog port: %s",
-				strerror(errno));
+				"Unable to bind TCP port %d: %s",
+				port, strerror(errno));
 		} else if (listen(sock, 5) == -1) {
 			Log::log(LOG_ERROR,
-				"Unable to listen to TCP listener port: %s",
+				"Unable to flag socket for listening: %s",
 				strerror(errno));
 		} else {
-			Log::log(LOG_DEBUG,
-				"TCP thread listing on port %d", port);
+			Log::log(LOG_INFO,
+				"Listing on TCP port %d", port);
 
 			bool localRun= run;
 			while (localRun) {
@@ -114,7 +114,7 @@ void Listener::stop()
 	delete thread;
 	thread= NULL;
 
-	std::list<std::shared_ptr<Connection>> localList;
+	std::list<ConnectionRef> localList;
 
 	{
 		std::unique_lock<std::mutex> permit(connectionListLock);
@@ -122,6 +122,11 @@ void Listener::stop()
 			localList.push_back(conn);
 		}
 		connectionList.clear();
+	}
+
+	for (ConnectionRef conn : localList) {
+		Log::log(LOG_INFO, "Force stopping active connection");
+		conn->stop();
 	}
 
 	close(stopPipe[0]);

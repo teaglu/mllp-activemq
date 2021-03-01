@@ -19,8 +19,8 @@ public:
 	};
 
 protected:
-	virtual bool handleData(char const *data, int dataLen);
-	virtual void handleEof();
+	virtual bool handleData(char const *data, int dataLen) override;
+	virtual void handleEof() override;
 
 protected:
 	virtual bool parse(char const *message) = 0;
