@@ -2,6 +2,7 @@
 
 #include "Server.h"
 #include "AmqServer.h"
+#include "LocalServer.h"
 
 #include "Listener.h"
 #include "MllpV2Listener.h"
@@ -40,10 +41,11 @@ int main(int argc, char* argv[])
 	char const *brokerUri= getenv("AMQ_BROKER_URI");
 	char const *brokerUser= getenv("AMQ_BROKER_USER");
 	char const *brokerPass= getenv("AMQ_BROKER_PASS");
-	char const *queue= getenv("QUEUE");
+	char const *queueName= getenv("QUEUE");
+	char const *localQueuePath= getenv("LOCALQUEUE_PATH");
 
 	int c;
-	while ((c= getopt(argc, argv, "S:U:P:Q:")) != -1) {
+	while ((c= getopt(argc, argv, "S:U:P:Q:L:")) != -1) {
 		switch (c) {
 		case 'p':
 			mllpPort= atoi(optarg);
@@ -67,7 +69,11 @@ int main(int argc, char* argv[])
 			break;
 
 		case 'Q':
-			queue= optarg;
+			queueName= optarg;
+			break;
+
+		case 'L':
+			localQueuePath= optarg;
 			break;
 
 		default:
@@ -88,10 +94,23 @@ int main(int argc, char* argv[])
 	}
 
 	if (valid) {
-   		ServerRef server= AmqServer::Create(brokerUri, brokerUser, brokerPass);
-		server->start();
+   		ServerRef amqServer= AmqServer::Create(
+			brokerUri, brokerUser, brokerPass, queueName);
+		amqServer->start();
 
-		ListenerRef listener= MllpV2Listener::Create(2575, server, queue);
+		ServerRef server= amqServer;
+
+		ServerRef localServer;
+		if (localQueuePath != NULL) {
+			localServer= LocalServer::Create(
+				localQueuePath, amqServer);
+
+			localServer->start();
+
+			server= localServer;
+		}
+
+		ListenerRef listener= MllpV2Listener::Create(2575, server);
 		listener->start();
 
 		for (rundown= false; !rundown; ) {
@@ -101,8 +120,13 @@ int main(int argc, char* argv[])
 		Log::log(LOG_INFO, "Stopping Listener");
 		listener->stop();
 
+		if (localServer) {
+			Log::log(LOG_INFO, "Stopping local queue");
+			localServer->stop();
+		}
+
 		Log::log(LOG_INFO, "Stopping MQ Connection");
-		server->stop();
+		amqServer->stop();
 	}
 
 	activemq::library::ActiveMQCPP::shutdownLibrary();

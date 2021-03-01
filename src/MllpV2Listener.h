@@ -6,15 +6,14 @@ typedef std::shared_ptr<Server> ServerRef;
 
 class MllpV2Listener : public Listener {
 public:
-	MllpV2Listener(int port, ServerRef server, char const *queue);
+	MllpV2Listener(int port, ServerRef server);
 	virtual ~MllpV2Listener();
 
 	static ListenerRef Create(
 		int port,
-		ServerRef server,
-		char const *queue)
+		ServerRef server)
 	{
-		return std::make_shared<MllpV2Listener>(port, server, queue);
+		return std::make_shared<MllpV2Listener>(port, server);
 	}
 
 protected:
@@ -22,6 +21,5 @@ protected:
 
 private:
 	ServerRef server;
-	std::string queue;
 };
 

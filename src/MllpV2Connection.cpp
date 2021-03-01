@@ -10,9 +10,8 @@
 MllpV2Connection::MllpV2Connection(
 	ListenerRef listener,
 	int sock,
-	ServerRef server,
-	char const *queue)
-	: MllpConnection(listener, sock, server, queue)
+	ServerRef server)
+	: MllpConnection(listener, sock, server)
 {
 }
 

@@ -6,83 +6,49 @@
 
 #define QUEUE_LIMIT 8192
 
-OutboundMessage::OutboundMessage(char const *destination, char const *data)
+Frame::Frame(char const *data)
 {
-	this->destination= destination;
 	this->data= data;
+	this->success= false;
+}
+
+bool Frame::await(int timeout) {
+	std::unique_lock<std::mutex> lock(completeLock);
+
+	if (completeWake.wait_for(lock,
+		std::chrono::seconds(timeout)) == std::cv_status::timeout)
+	{
+		Log::log(LOG_WARNING, "Timeout waiting for call frame");
+	}
+
+	return success;
+}
+
+void Frame::complete(bool success) {
+	this->success= success;
+	completeWake.notify_one();
 }
 
 AmqServer::AmqServer(
-	char const *brokerUri, char const *user, char const *pass)
+	char const *brokerUri, char const *user, char const *pass,
+	char const *queueName)
 {
 	this->brokerUri= brokerUri;
 	this->user= user;
 	this->pass= pass;
+	this->queueName= queueName;
 
 	factory= 
 		new activemq::core::ActiveMQConnectionFactory(brokerUri);
 
-	sendQueue= std::make_shared<std::list<OutboundMessage *>>();
-	sendQueueCnt= 0;
-
-	lostDataFd= -1;
-	sendQueueOverflow= 0;
+	connection= NULL;
+	session= NULL;
 }
 
 AmqServer::~AmqServer()
 {
-	if (!sendQueue->empty()) {
-		while (!sendQueue->empty()) {
-			OutboundMessage *m= sendQueue->front();
-			sendQueue->pop_front();
-
-			saveLostData(m->getDestination(), m->getData());
-			delete m;
-		}
-	}
-
-	if (lostDataFd != -1) {
-		close(lostDataFd);
-	}
-
+	sendQueue.clear();
 	delete factory;
-}
-
-void AmqServer::saveLostData(char const *destination, char const *data)
-{
-	std::unique_lock<std::mutex> lock(lostDataMutex);
-
-	if (lostDataFd == -1) {
-		lostDataFd= open("lost-data.dat",
-			O_WRONLY|O_APPEND|O_CREAT, S_IRUSR|S_IWUSR);
-
-		if (lostDataFd == -1) {
-			Log::log(LOG_ERROR,
-				"Error opening lost data file: %s",
-				strerror(errno));
-		}
-	}
-
-	if (lostDataFd != -1) {
-		char delim[]= "\n\n";
-		int delimLen= strlen(delim);
-
-		struct iovec parts[5];
-		parts[0].iov_base= (void *)destination;
-		parts[0].iov_len= strlen(destination);
-		parts[1].iov_base= delim;
-		parts[1].iov_len= delimLen;
-		parts[2].iov_base= (void *)data;
-		parts[2].iov_len= strlen(data);
-		parts[3].iov_base= delim;
-		parts[3].iov_len= delimLen;
-
-		if (writev(lostDataFd, parts, 4) == -1) {
-			Log::log(LOG_ERROR,
-				"Error writing lost data: %s",
-				strerror(errno));
-		}
-	}
 }
 
 void AmqServer::onException(const cms::CMSException &ex)
@@ -97,28 +63,20 @@ void AmqServer::onException(const cms::CMSException &ex)
 	sendQueueCond.notify_one();
 }
 
-bool AmqServer::queue(char const *destination, char const *data)
+bool AmqServer::queue(char const *data)
 {
-	std::unique_lock<std::mutex> lock(sendQueueMutex);
+	FrameRef frame= std::make_shared<Frame>(data);
 
-	if (sendQueueCnt >= QUEUE_LIMIT) {
-		if (sendQueueOverflow == 0) {
-			Log::log(LOG_WARNING,
-				"Writing data to lost file at %d messages",
-				sendQueueCnt);
-		}
-		saveLostData(destination, data);	
-		sendQueueOverflow++;
-	} else {
-		OutboundMessage *m= new OutboundMessage(destination, data);
-
-		sendQueue->push_back(m);
-		sendQueueCnt++;
-
-		sendQueueCond.notify_one();
+	{
+		std::lock_guard<std::mutex> lock(sendQueueLock);
+		sendQueue.push_back(frame);
 	}
 
-	return true;
+	sendQueueCond.notify_one();
+
+	Log::log(LOG_DEBUG, "Sending to AMQ");
+
+	return frame->await(10);
 }
 
 bool AmqServer::connect()
@@ -175,7 +133,7 @@ void AmqServer::disconnect()
 	}
 }
 
-bool AmqServer::send(OutboundMessage *msg)
+bool AmqServer::send(FrameRef frame)
 {
 	bool rval= false;
 
@@ -184,9 +142,9 @@ bool AmqServer::send(OutboundMessage *msg)
 	cms::TextMessage *message= NULL;
 
 	try {
-		destination= session->createQueue(msg->getDestination());
+		destination= session->createQueue(queueName.c_str());
 		producer= session->createProducer(destination);
-		message= session->createTextMessage(msg->getData());
+		message= session->createTextMessage(frame->getData());
 		producer->send(message);
 
 		rval= true;
@@ -194,7 +152,7 @@ bool AmqServer::send(OutboundMessage *msg)
 		std::string error= e.getMessage();
 
 		Log::log(LOG_ERROR,
-			"Error sending sendQueued message: %s",
+			"Error sending message: %s",
 			error.c_str());
 	}
 
@@ -218,57 +176,27 @@ void AmqServer::runLoop()
 
 		if (connect()) {
 			while (run && !error) {
-				std::shared_ptr<std::list<OutboundMessage *>> localQueue;
-
-				// We don't want to hang calling threads during any errors
-				// that we may have, so the idea is to pull all the items
-				// onto a local list.  The easier way is to just take the
-				// entire list and leave a new on in it's place.
-				//
-				// If there are errors we have to push them back on the
-				// front of the list, but this way we're optimizing for
-				// the success case.
+				FrameRef frame= nullptr;
 				{
-					std::unique_lock<std::mutex> lock(sendQueueMutex);
-					sendQueueCond.wait(lock);
-					if (!sendQueue->empty()) {
-						localQueue= sendQueue;
-
-						sendQueue= std::make_shared<
-							std::list<OutboundMessage *>>();
-						sendQueueCnt= 0;
+					std::unique_lock<std::mutex> lock(sendQueueLock);
+					if (!sendQueue.empty()) {
+						frame= sendQueue.front();
+						sendQueue.pop_front();
+					} else {
+						sendQueueCond.wait(lock);
+						if (!sendQueue.empty()) {
+							frame= sendQueue.front();
+							sendQueue.pop_front();
+						}
 					}
 				}
 
-				if (localQueue) {
-					while (run && !error && !localQueue->empty()) {
-						OutboundMessage *m= localQueue->front();
-
-						if (send(m)) {
-							localQueue->pop_front();
-							delete m;
-						} else {
-							error= true;
-						}
+				if (frame) {
+					bool success= send(frame);
+					if (!success) {
+						error= true;
 					}
-
-					std::unique_lock<std::mutex> lock(sendQueueMutex);
-					if (!localQueue->empty()) {
-						// Push any failures back on the front
-						while (!localQueue->empty()) {
-							OutboundMessage *m= localQueue->back();
-							localQueue->pop_back();
-
-							sendQueue->push_front(m);
-							sendQueueCnt++;
-						}
-					} else {
-						if (sendQueueOverflow > 0) {
-							Log::log(LOG_INFO,
-								"Lost Data: %d messages in lost data file",
-								sendQueueOverflow);
-						}
-					}
+					frame->complete(success);
 				}
 			}
 		}

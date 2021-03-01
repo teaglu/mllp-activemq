@@ -36,6 +36,7 @@
 #include <list>
 
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -56,4 +57,4 @@
 #undef LOG_INFO
 #undef LOG_DEBUG
 
-
+#include <assert.h>

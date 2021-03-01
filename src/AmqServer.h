@@ -1,19 +1,25 @@
-class OutboundMessage {
+class Frame {
 private:
-	std::string destination;
 	std::string data;
 
-public:
-	OutboundMessage(char const *dest, char const *data);
+	std::mutex completeLock;
+	std::condition_variable completeWake;
 
-	char const *getDestination() {
-		return destination.c_str();
-	}
+	bool success;
+
+public:
+	Frame(char const *data);
 
 	char const *getData() {
 		return data.c_str();
 	}
+
+	bool await(int timeout);
+
+	void complete(bool success);
 };
+
+typedef std::shared_ptr<Frame> FrameRef;
 
 class Server;
 class AmqServer : public Server, public cms::ExceptionListener {
@@ -21,6 +27,7 @@ private:
 	std::string brokerUri;
 	std::string user;
 	std::string pass;
+	std::string queueName;
 
 	cms::ConnectionFactory *factory;
 	cms::Connection *connection;
@@ -28,14 +35,9 @@ private:
 
 	std::thread *thread;
 
-	std::shared_ptr<std::list<OutboundMessage *>> sendQueue;
-	int sendQueueCnt;
-	std::mutex sendQueueMutex;
+	std::list<FrameRef> sendQueue;
+	std::mutex sendQueueLock;
 	std::condition_variable sendQueueCond;
-	int sendQueueOverflow;
-
-	std::mutex lostDataMutex;
-	int lostDataFd;
 
 	virtual void onException(const cms::CMSException &ex);
 
@@ -45,9 +47,7 @@ private:
 protected:
 	bool connect();
 	void disconnect();
-	bool send(OutboundMessage *);
-
-	void saveLostData(char const *destination, char const *data);
+	bool send(FrameRef);
 
 	void runLoop();
 
@@ -55,19 +55,21 @@ public:
 	AmqServer(
 		char const *brokerURI,
 		char const *user,
-		char const *pass);
+		char const *pass,
+		char const *queueName);
 
 	static ServerRef Create(
         char const *uri,
         char const *user,
-        char const *pass)
+        char const *pass,
+		char const *queueName)
 	{
-		return std::make_shared<AmqServer>(uri, user, pass);
+		return std::make_shared<AmqServer>(uri, user, pass, queueName);
 	}
 
 	virtual ~AmqServer();
 
-	bool queue(char const *destination, char const *data);
+	bool queue(char const *data);
 
 	void start();
 	void stop();

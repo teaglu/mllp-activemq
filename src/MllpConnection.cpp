@@ -11,12 +11,10 @@
 MllpConnection::MllpConnection(
 	ListenerRef listener,
 	int sock,
-	ServerRef server,
-	char const *queue)
+	ServerRef server)
 	: TcpConnection(listener, sock)
 {
 	this->server= server;
-	this->queue= queue;
 
 	mllpState= MllpState::WAIT_SB;
 }
@@ -86,7 +84,7 @@ bool MllpConnection::handleMessage(char const *message)
 	bool success= false;
 
 	if (parse(message)) {
-		if (server->queue(queue.c_str(), message)) {
+		if (server->queue(message)) {
 			acknowledge(AckType::ACCEPT);
 			success= true;
 		} else {

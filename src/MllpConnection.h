@@ -8,8 +8,7 @@ public:
 	MllpConnection(
 		ListenerRef listener,
 		int sock,
-		ServerRef server,
-		char const *queue);
+		ServerRef server);
 
 	virtual ~MllpConnection();
 
@@ -29,7 +28,6 @@ protected:
 
 private:
 	ServerRef server;
-	std::string queue;
 
 	enum class MllpState {
 		WAIT_SB,
