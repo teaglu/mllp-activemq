@@ -9,6 +9,7 @@ AM_CXXFLAGS = -g -std=c++11 -pthread -Wall -fno-strict-aliasing \
 bin_PROGRAMS = mllp-activemq
 
 mllp_activemq_SOURCES = \
+	Message.cpp \
 	Server.cpp \
 	AmqServer.cpp \
 	LocalServer.cpp \

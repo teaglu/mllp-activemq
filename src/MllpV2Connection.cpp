@@ -10,8 +10,9 @@
 MllpV2Connection::MllpV2Connection(
 	ListenerRef listener,
 	int sock,
-	ServerRef server)
-	: MllpConnection(listener, sock, server)
+	ServerRef server,
+	char const *remoteHost)
+	: MllpConnection(listener, sock, server, remoteHost)
 {
 }
 

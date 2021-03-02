@@ -8,8 +8,8 @@
 #include "MllpConnection.h"
 #include "MllpV2Connection.h"
 
-MllpV2Listener::MllpV2Listener(int port, ServerRef server)
-	: Listener(port)
+MllpV2Listener::MllpV2Listener(int family, int port, ServerRef server)
+	: Listener(family, port)
 {
 	this->server= server;
 }
@@ -18,11 +18,12 @@ MllpV2Listener::~MllpV2Listener()
 {
 }
 
-ConnectionRef MllpV2Listener::connect(int sock, struct sockaddr_in *)
+ConnectionRef MllpV2Listener::connect(int sock, char const *remoteHost)
 {
 	return std::make_shared<MllpV2Connection>(
 		shared_from_this(),
 		sock,
-		server);
+		server,
+		remoteHost);
 }
 

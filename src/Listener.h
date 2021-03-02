@@ -6,7 +6,7 @@ class Listener
 	: public std::enable_shared_from_this<Listener>
 {
 protected:
-	virtual ConnectionRef connect(int sock, struct sockaddr_in *) = 0;
+	virtual ConnectionRef connect(int sock, char const *remoteHost) = 0;
 
 private:
     std::thread *thread;
@@ -17,13 +17,17 @@ private:
 	std::mutex runLock;
 
 	int port;
+	int family;
+
+	char const *familyName;
+
     void listenLoop();
 
 	std::mutex connectionListLock;
 	std::list<std::shared_ptr<Connection>> connectionList;
 
 public:
-	Listener(int port);
+	Listener(int family, int port);
 	virtual ~Listener();
 
 	virtual bool start();

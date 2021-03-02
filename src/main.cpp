@@ -110,15 +110,22 @@ int main(int argc, char* argv[])
 			server= localServer;
 		}
 
-		ListenerRef listener= MllpV2Listener::Create(2575, server);
-		listener->start();
+		ListenerRef ip4Listener=
+			MllpV2Listener::Create(AF_INET, mllpPort, server);
+
+		ListenerRef ip6Listener=
+			MllpV2Listener::Create(AF_INET6, mllpPort, server);
+
+		ip4Listener->start();
+		ip6Listener->start();
 
 		for (rundown= false; !rundown; ) {
 			pause();
 		}
 
 		Log::log(LOG_INFO, "Stopping Listener");
-		listener->stop();
+		ip4Listener->stop();
+		ip6Listener->stop();
 
 		if (localServer) {
 			Log::log(LOG_INFO, "Stopping local queue");

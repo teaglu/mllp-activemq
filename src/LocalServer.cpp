@@ -1,6 +1,7 @@
 #include "system.h"
 
 #include "Log.h"
+#include "Message.h"
 #include "Server.h"
 #include "LocalServer.h"
 
@@ -10,9 +11,9 @@
 // a full implementation of an on-disk queue.  If this gets too large we
 // will eventually run out of memory.
 
-Entry::Entry(char const *filename, char const *message)
+Entry::Entry(char const *fileId, MessageRef message)
 {
-	this->filename= filename;
+	this->fileId= fileId;
 	this->message= message;
 }
 
@@ -39,7 +40,101 @@ LocalServer::~LocalServer()
 {
 }
 
-bool LocalServer::queue(char const *data)
+// FIXME to test cycling
+#define READ_BUFFER 15
+
+bool LocalServer::readFile(char const *path, std::string &data)
+{
+	bool success= false;
+
+	int fd= open(path, O_RDONLY);
+	if (fd == -1) {
+		Log::log(LOG_ERROR,
+			"Unable to open queue file %s: %s",
+			path, strerror(errno));
+	} else {
+		char buffer[READ_BUFFER + 1];
+
+		bool error= false;
+		for (bool run= true; run; ) {
+			int bytesRead= read(fd, buffer, READ_BUFFER);
+			if (bytesRead == -1) {
+				Log::log(LOG_ERROR,
+					"Error reading from file %s: %s",
+					path, strerror(errno));
+				error= true;
+			} else if (bytesRead == 0) {
+				run= false;
+			} else {
+				buffer[bytesRead]= '\0';
+				data.append(buffer);
+			}
+		}
+
+		close(fd);
+		success= !error;
+	}
+
+	return success;
+}
+
+
+bool LocalServer::writeFile(char const *path, char const *data, size_t dataLen)
+{
+	bool success= false;
+
+	int fd= open(path,
+		O_WRONLY|O_CREAT|O_CLOEXEC|O_EXCL,
+		S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP);
+
+	if (fd == -1) {
+		Log::log(LOG_ERROR,
+			"Unable to open queue file %s: %s",
+			path, strerror(errno));
+	} else {
+		int written= write(fd, data, dataLen);
+		if (written == -1) {
+			Log::log(LOG_ERROR,
+				"Unable to write queue files %s: %s",
+				path, strerror(errno));
+		} else if ((size_t)written != dataLen) {
+			Log::log(LOG_ERROR,
+				"Wrong write count from file %s - wanted %d got %d",
+				path, dataLen, written);
+		} else if (fdatasync(fd) == -1) {
+			Log::log(LOG_ERROR,
+				"Error in fdatasync on %s: %s",
+				path, strerror(errno));
+		} else {
+			success= true;
+		}
+
+		if (close(fd) == -1) {
+			Log::log(LOG_ERROR,
+				"Error closing out queue file %s: %s",
+				path, strerror(errno));
+
+			success= false;
+		}
+
+		if (!success) {
+			// If we were able to create the file but we were unable to
+			// properly write it, try to delete it so we don't introduce
+			// bogus data.  If that's not possible because the filesystem
+			// is completely sideways - not much we can do.
+
+			if (unlink(path) == -1) {
+				Log::log(LOG_ERROR,
+					"Unable to unlink faulty file %s: %s",
+					path, strerror(errno));
+			}
+		}
+	}
+
+	return success;
+}
+
+bool LocalServer::queue(MessageRef message)
 {
 	bool success= false;
 
@@ -62,8 +157,8 @@ bool LocalServer::queue(char const *data)
 		counter= nameCounter++;
 	}
 
-	char filename[64];
-	sprintf(filename, "%04d%02d%02d-%02d%02d%02d-%04d.hl7",
+	char fileId[64];
+	sprintf(fileId, "%04d%02d%02d-%02d%02d%02d-%04d",
 		nowParts.tm_year + 1900,
 		nowParts.tm_mon + 1,
 		nowParts.tm_mday,
@@ -72,82 +167,97 @@ bool LocalServer::queue(char const *data)
 		nowParts.tm_sec,
 		counter);
 
-	std::string path= basePath;
-	path.append("/");
-	path.append(filename);
+	std::string dataPath= basePath;
+	dataPath.append("/");
+	dataPath.append(fileId);
+	dataPath.append(".hl7");
 
 	// We don't attempt to do anything until we're sure the message is
 	// flushed out to disk
 
-	int fd= open(path.c_str(),
-		O_WRONLY|O_CREAT|O_CLOEXEC|O_EXCL,
-		S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP);
+	success= writeFile(dataPath.c_str(),
+		message->getData(), message->getDataLen());
 
-	if (fd == -1) {
-		Log::log(LOG_ERROR,
-			"Unable to open queue file %s: %s",
-			path.c_str(), strerror(errno));
-	} else {
-		int size= strlen(data);
-		int written= write(fd, data, size);
-		if (written == -1) {
-			Log::log(LOG_ERROR,
-				"Unable to write queue files %s: %s",
-				path.c_str(), strerror(errno));
-		} else if (written != size) {
-			Log::log(LOG_ERROR,
-				"Wrong write count from file %s - wanted %d got %d",
-				path.c_str(), size, written);
-		} else if (fdatasync(fd) == -1) {
-			Log::log(LOG_ERROR,
-				"Error in fdatasync on %s: %s",
-				path.c_str(), strerror(errno));
-		} else {
-			success= true;
-		}
+	if (success) {
+		Json::Value metaObject= Json::objectValue;
+		metaObject["timestamp"]= (int)message->getTimestamp();
+		metaObject["remoteHost"]= message->getRemoteHost();
 
-		if (close(fd) == -1) {
-			Log::log(LOG_ERROR,
-				"Error closing out queue file %s: %s",
-				path.c_str(), strerror(errno));
+		std::string metaData= Json::FastWriter().write(metaObject);
 
-			success= false;
-		}
+		std::string metaPath= basePath;
+		metaPath.append("/");
+		metaPath.append(fileId);
+		metaPath.append(".meta");
+
+		success= writeFile(metaPath.c_str(),
+			metaData.c_str(), metaData.length());
 
 		if (!success) {
-			// If we were able to create the file but we were unable to
-			// properly write it, try to delete it so we don't introduce
-			// bogus data.  If that's not possible because the filesystem
-			// is completely sideways - not much we can do.
-
-			if (unlink(path.c_str()) == -1) {
+			if (unlink(dataPath.c_str()) == -1) {
 				Log::log(LOG_ERROR,
-					"Unable to unlink faulty file %s: %s",
-					path.c_str(), strerror(errno));
+					"Unable to unlink data file %s "
+					"after failing to write meta file %s: %s",
+					dataPath.c_str(), metaPath.c_str(),
+					strerror(errno));
 			}
+		}
+	}
+
+	if (success) {
+		EntryRef entry= std::make_shared<Entry>(fileId, message);
+
+		std::lock_guard<std::mutex> permit(writerLock);
+		writerQueue.push_back(entry);
+
+		// Wake up the writer and try to push immediately
+		writerWake.notify_one();
+	}
+
+	return success;
+}
+
+bool LocalServer::loadMetadata(
+	char const *fileId, time_t &timestamp, std::string &remoteHost)
+{
+	bool success= false;
+
+	std::string metaPath;
+	metaPath.append(basePath);
+	metaPath.append(1, '/');
+	metaPath.append(fileId);
+	metaPath.append(".meta");
+
+	std::string metadata;
+	if (!readFile(metaPath.c_str(), metadata)) {
+		Log::log(LOG_ERROR,
+			"Failed to read metadata file for %s: %s",
+			metaPath.c_str(), strerror(errno));	
+	} else {
+		Json::Reader parser;
+		Json::Value data;
+
+		if (!parser.parse(metadata, data, false)) {
+			Log::log(LOG_ERROR,
+				"Failed to parse JSON metadata file: %s",
+				metadata.c_str());
 		} else {
-			EntryRef entry= std::make_shared<Entry>(filename, data);
+			timestamp= (time_t)(data["timestamp"].asInt());
+			remoteHost= data["remoteHost"].asString();
 
-			std::lock_guard<std::mutex> permit(writerLock);
-			writerQueue.push_back(entry);
-
-			// Wake up the writer and try to push immediately
-			writerWake.notify_one();
+			success= true;
 		}
 	}
 
 	return success;
 }
 
-// FIXME to test cycling
-#define READ_BUFFER 15
-
 void LocalServer::loadQueueDirectory()
 {
 	// This routine is called once at startup to load any dangling files
 	// from the last run into the memory structure.
 
-	std::list<std::string> fileList;
+	std::list<std::string> fileIdList;
 
 	DIR *dir= opendir(basePath.c_str());
 	if (dir == NULL) {
@@ -158,52 +268,50 @@ void LocalServer::loadQueueDirectory()
 		struct dirent *de= NULL;
 		while ((de= readdir(dir)) != NULL) {
 			if (de->d_name[0] != '.') {
-				fileList.push_back(de->d_name);
+				std::string filename(de->d_name);
+				size_t offset= filename.rfind('.');
+				if (offset != std::string::npos) {
+					std::string fileId= filename.substr(0, offset);
+					std::string exten= filename.substr(offset + 1);
+
+					if (exten == "hl7") {
+						fileIdList.push_back(fileId);
+					}
+				}
 			}
 		}
 		closedir(dir);
 	}
 
-	for (std::string filename : fileList) {
-		std::string path;
-		path.append(basePath);
-		path.append(1, '/');
-		path.append(filename);
+	for (std::string fileId : fileIdList) {
+		std::string dataPath;
+		dataPath.append(basePath);
+		dataPath.append(1, '/');
+		dataPath.append(fileId);
+		dataPath.append(".hl7");
 
-		int fd= open(path.c_str(), O_RDONLY);
-		if (fd == -1) {
-			Log::log(LOG_ERROR,
-				"Unable to open queue file %s: %s",
-				path.c_str(), strerror(errno));
-		} else {
-			std::string message;
-			char buffer[READ_BUFFER + 1];
+		std::string data;
+		if (readFile(dataPath.c_str(), data)) {
+			time_t timestamp;
+			std::string remoteHost;
 
-			bool error= false;
-			for (bool run= true; run; ) {
-				int bytesRead= read(fd, buffer, READ_BUFFER);
-				if (bytesRead == -1) {
-					Log::log(LOG_ERROR,
-						"Error reading from queue file %s: %s",
-						path.c_str(), strerror(errno));
-					error= true;
-				} else if (bytesRead == 0) {
-					run= false;
-				} else {
-					buffer[bytesRead]= '\0';
-					message.append(buffer);
-				}
+			if (!loadMetadata(fileId.c_str(), timestamp, remoteHost)) {
+				timestamp= (time_t)0;
+				remoteHost= "LOST";
 			}
 
-			if (!error && (message.length() > 0)) {
-				EntryRef entry= Entry::Create(
-					filename.c_str(), message.c_str());
+			Log::log(LOG_DEBUG,
+				"Queueing remnant %s from %s at %ul",
+				fileId.c_str(), remoteHost.c_str(), timestamp);
 
-				std::lock_guard<std::mutex> permit(writerLock);
-				writerQueue.push_back(entry);
-			}
 
-			close(fd);
+			MessageRef message= Message::Create(
+				timestamp, remoteHost.c_str(), data.c_str());
+
+			EntryRef entry= Entry::Create(fileId.c_str(), message);
+
+			std::lock_guard<std::mutex> permit(writerLock);
+			writerQueue.push_back(entry);
 		}
 	}
 }
@@ -236,7 +344,8 @@ void LocalServer::writerLoop()
 			std::string path;
 			path.append(basePath);
 			path.append("/");
-			path.append(entry->getFilename());
+			path.append(entry->getFileId());
+			path.append(".hl7");
 
 			if (upstream->queue(entry->getMessage())) {
 				// Message was successfully sent, so delete the backing file
@@ -249,7 +358,7 @@ void LocalServer::writerLoop()
 			} else {
 				Log::log(LOG_WARNING,
 					"Unable to send %s - waiting %d seconds to retry",
-					path.c_str(), RETRY_TIMEOUT);
+					entry->getFileId(), RETRY_TIMEOUT);
 
 				{
 					std::lock_guard<std::mutex> permit(writerLock);

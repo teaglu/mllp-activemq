@@ -1,21 +1,29 @@
+class Message;
+typedef std::shared_ptr<Message> MessageRef;
+
 class Frame {
 private:
-	std::string data;
+	MessageRef message;
 
 	std::mutex completeLock;
 	std::condition_variable completeWake;
 
+	bool abandoned;
 	bool success;
 
 public:
-	Frame(char const *data);
+	Frame(MessageRef message);
 
-	char const *getData() {
-		return data.c_str();
+	MessageRef getMessage() {
+		return message;
+	}
+
+	bool isAbandoned() {
+		std::lock_guard<std::mutex> permit(completeLock);
+		return abandoned;
 	}
 
 	bool await(int timeout);
-
 	void complete(bool success);
 };
 
@@ -69,7 +77,7 @@ public:
 
 	virtual ~AmqServer();
 
-	bool queue(char const *data);
+	bool queue(MessageRef);
 
 	void start();
 	void stop();

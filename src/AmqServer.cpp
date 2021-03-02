@@ -1,15 +1,17 @@
 #include "system.h"
 
 #include "Log.h"
+#include "Message.h"
 #include "Server.h"
 #include "AmqServer.h"
 
 #define QUEUE_LIMIT 8192
 
-Frame::Frame(char const *data)
+Frame::Frame(MessageRef message)
 {
-	this->data= data;
+	this->message= message;
 	this->success= false;
+	this->abandoned= false;
 }
 
 bool Frame::await(int timeout) {
@@ -19,6 +21,8 @@ bool Frame::await(int timeout) {
 		std::chrono::seconds(timeout)) == std::cv_status::timeout)
 	{
 		Log::log(LOG_WARNING, "Timeout waiting for call frame");
+
+		abandoned= true;
 	}
 
 	return success;
@@ -63,9 +67,9 @@ void AmqServer::onException(const cms::CMSException &ex)
 	sendQueueCond.notify_one();
 }
 
-bool AmqServer::queue(char const *data)
+bool AmqServer::queue(MessageRef message)
 {
-	FrameRef frame= std::make_shared<Frame>(data);
+	FrameRef frame= std::make_shared<Frame>(message);
 
 	{
 		std::lock_guard<std::mutex> lock(sendQueueLock);
@@ -137,6 +141,13 @@ bool AmqServer::send(FrameRef frame)
 {
 	bool rval= false;
 
+	if (frame->isAbandoned()) {
+		Log::log(LOG_INFO,
+			"Ignoring abandoned frame");
+
+		return true;
+	}
+
 	cms::Destination *destination= NULL;
 	cms::MessageProducer *producer= NULL;
 	cms::TextMessage *message= NULL;
@@ -144,7 +155,14 @@ bool AmqServer::send(FrameRef frame)
 	try {
 		destination= session->createQueue(queueName.c_str());
 		producer= session->createProducer(destination);
-		message= session->createTextMessage(frame->getData());
+		message= session->createTextMessage(frame->getMessage()->getData());
+
+		long long javaTimestamp=
+			frame->getMessage()->getTimestamp() * 1000L;
+		message->setLongProperty("MLLP-Timestamp", javaTimestamp);
+		message->setStringProperty("MLLP-RemoteHost",
+			frame->getMessage()->getRemoteHost());
+
 		producer->send(message);
 
 		rval= true;

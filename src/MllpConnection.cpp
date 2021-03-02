@@ -4,6 +4,7 @@
 #include "TcpConnection.h"
 #include "MllpConnection.h"
 
+#include "Message.h"
 #include "Server.h"
 
 #include "Log.h"
@@ -11,10 +12,12 @@
 MllpConnection::MllpConnection(
 	ListenerRef listener,
 	int sock,
-	ServerRef server)
+	ServerRef server,
+	char const *remoteHost)
 	: TcpConnection(listener, sock)
 {
 	this->server= server;
+	this->remoteHost= remoteHost;
 
 	mllpState= MllpState::WAIT_SB;
 }
@@ -79,12 +82,18 @@ void MllpConnection::handleEof()
 {
 }
 
-bool MllpConnection::handleMessage(char const *message)
+bool MllpConnection::handleMessage(char const *data)
 {
 	bool success= false;
 
-	if (parse(message)) {
+	if (parse(data)) {
+		time_t now;
+		time(&now);
+
+		Log::log(LOG_DEBUG, "handleMessage: %s", remoteHost.c_str());
+		MessageRef message= Message::Create(now, remoteHost.c_str(), data);
 		if (server->queue(message)) {
+			Log::log(LOG_DEBUG, "REMOTE=%s", remoteHost.c_str());
 			acknowledge(AckType::ACCEPT);
 			success= true;
 		} else {

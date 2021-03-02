@@ -5,7 +5,8 @@ public:
 	MllpV2Connection(
 		ListenerRef listener,
 		int sock,
-		ServerRef server);
+		ServerRef server,
+		char const *remoteHost);
 
 	virtual ~MllpV2Connection();
 
