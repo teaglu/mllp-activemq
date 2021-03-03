@@ -5,5 +5,7 @@
 aclocal
 autoheader
 autoconf
-automake
+if ! automake; then
+	automake --add-missing
+fi
 
