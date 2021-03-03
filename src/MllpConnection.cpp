@@ -60,6 +60,8 @@ bool MllpConnection::handleData(char const *data, int dataLen)
 			if (c == 0x0D) {
 				if (handleMessage(mllpMessage.c_str())) {
 					mllpState= MllpState::WAIT_SB;
+
+					mllpMessage.clear();
 				} else {
 					Log::log(LOG_ERROR,
 						"Failed to process MLLP message");
