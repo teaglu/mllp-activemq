@@ -4,6 +4,7 @@
 #include "Message.h"
 #include "Server.h"
 #include "AmqServer.h"
+#include "DateUtil.h"
 
 #define QUEUE_LIMIT 8192
 
@@ -156,13 +157,13 @@ bool AmqServer::send(FrameRef frame)
 		destination= session->createQueue(queueName.c_str());
 		producer= session->createProducer(destination);
 
-		long long javaTimestamp=
-			frame->getMessage()->getTimestamp() * 1000L;
+		std::string timestamp= DateUtil::TimeToISO8601(
+			frame->getMessage()->getTimestamp());
 
 		if (jsonEnvelope) {
 			Json::Value envelope= Json::objectValue;
 			envelope["message"]= frame->getMessage()->getData();
-			envelope["timestamp"]=  javaTimestamp;
+			envelope["timestamp"]=  timestamp;
 			envelope["remoteHost"]= frame->getMessage()->getRemoteHost();
 
 			std::string bodyString= Json::FastWriter().write(envelope);
@@ -172,7 +173,7 @@ bool AmqServer::send(FrameRef frame)
 				frame->getMessage()->getData());
 		}
 
-		message->setLongProperty("MLLP-Timestamp", javaTimestamp);
+		message->setStringProperty("MLLP-Timestamp", timestamp.c_str());
 		message->setStringProperty("MLLP-RemoteHost",
 			frame->getMessage()->getRemoteHost());
 

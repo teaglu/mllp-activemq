@@ -20,6 +20,7 @@ mllp_activemq_SOURCES = \
 	MllpV2Connection.cpp \
 	MllpV2Listener.cpp \
 	Log.cpp \
+	DateUtil.cpp \
 	main.cpp
 
 mllp_activemq_LDFLAGS = -pthread
