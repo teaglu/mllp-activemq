@@ -36,6 +36,7 @@ private:
 	std::string user;
 	std::string pass;
 	std::string queueName;
+	bool jsonEnvelope;
 
 	cms::ConnectionFactory *factory;
 	cms::Connection *connection;
@@ -64,15 +65,18 @@ public:
 		char const *brokerURI,
 		char const *user,
 		char const *pass,
-		char const *queueName);
+		char const *queueName,
+		bool jsonEnvelope);
 
 	static ServerRef Create(
         char const *uri,
         char const *user,
         char const *pass,
-		char const *queueName)
+		char const *queueName,
+		bool jsonEnvelope)
 	{
-		return std::make_shared<AmqServer>(uri, user, pass, queueName);
+		return std::make_shared<AmqServer>(
+			uri, user, pass, queueName, jsonEnvelope);
 	}
 
 	virtual ~AmqServer();

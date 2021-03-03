@@ -44,8 +44,10 @@ int main(int argc, char* argv[])
 	char const *queueName= getenv("QUEUE");
 	char const *localQueuePath= getenv("LOCALQUEUE_PATH");
 
+	bool jsonEnvelope= false;
+
 	int c;
-	while ((c= getopt(argc, argv, "S:U:P:Q:L:")) != -1) {
+	while ((c= getopt(argc, argv, "S:U:P:Q:L:j")) != -1) {
 		switch (c) {
 		case 'p':
 			mllpPort= atoi(optarg);
@@ -76,6 +78,10 @@ int main(int argc, char* argv[])
 			localQueuePath= optarg;
 			break;
 
+		case 'j':
+			jsonEnvelope= true;
+			break;
+
 		default:
 			fprintf(stderr, "Unknown argument %c\n", optopt);
 			exit(1);
@@ -95,7 +101,7 @@ int main(int argc, char* argv[])
 
 	if (valid) {
    		ServerRef amqServer= AmqServer::Create(
-			brokerUri, brokerUser, brokerPass, queueName);
+			brokerUri, brokerUser, brokerPass, queueName, jsonEnvelope);
 		amqServer->start();
 
 		ServerRef server= amqServer;

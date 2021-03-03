@@ -35,12 +35,14 @@ void Frame::complete(bool success) {
 
 AmqServer::AmqServer(
 	char const *brokerUri, char const *user, char const *pass,
-	char const *queueName)
+	char const *queueName,
+	bool jsonEnvelope)
 {
 	this->brokerUri= brokerUri;
 	this->user= user;
 	this->pass= pass;
 	this->queueName= queueName;
+	this->jsonEnvelope= jsonEnvelope;
 
 	factory= 
 		new activemq::core::ActiveMQConnectionFactory(brokerUri);
@@ -77,8 +79,6 @@ bool AmqServer::queue(MessageRef message)
 	}
 
 	sendQueueCond.notify_one();
-
-	Log::log(LOG_DEBUG, "Sending to AMQ");
 
 	return frame->await(10);
 }
@@ -155,10 +155,23 @@ bool AmqServer::send(FrameRef frame)
 	try {
 		destination= session->createQueue(queueName.c_str());
 		producer= session->createProducer(destination);
-		message= session->createTextMessage(frame->getMessage()->getData());
 
 		long long javaTimestamp=
 			frame->getMessage()->getTimestamp() * 1000L;
+
+		if (jsonEnvelope) {
+			Json::Value envelope= Json::objectValue;
+			envelope["message"]= frame->getMessage()->getData();
+			envelope["timestamp"]=  javaTimestamp;
+			envelope["remoteHost"]= frame->getMessage()->getRemoteHost();
+
+			std::string bodyString= Json::FastWriter().write(envelope);
+			message= session->createTextMessage(bodyString.c_str());
+		} else {
+			message= session->createTextMessage(
+				frame->getMessage()->getData());
+		}
+
 		message->setLongProperty("MLLP-Timestamp", javaTimestamp);
 		message->setStringProperty("MLLP-RemoteHost",
 			frame->getMessage()->getRemoteHost());

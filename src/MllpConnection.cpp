@@ -90,10 +90,8 @@ bool MllpConnection::handleMessage(char const *data)
 		time_t now;
 		time(&now);
 
-		Log::log(LOG_DEBUG, "handleMessage: %s", remoteHost.c_str());
 		MessageRef message= Message::Create(now, remoteHost.c_str(), data);
 		if (server->queue(message)) {
-			Log::log(LOG_DEBUG, "REMOTE=%s", remoteHost.c_str());
 			acknowledge(AckType::ACCEPT);
 			success= true;
 		} else {
