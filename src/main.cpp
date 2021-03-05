@@ -38,16 +38,16 @@ int main(int argc, char* argv[])
 	int mllpVersion= 2;
 	int mllpPort= 2575;
 
-	char const *brokerUri= getenv("AMQ_BROKER_URI");
-	char const *brokerUser= getenv("AMQ_BROKER_USER");
-	char const *brokerPass= getenv("AMQ_BROKER_PASS");
-	char const *queueName= getenv("QUEUE");
+	char const *brokerUri= getenv("AMQ_URI");
+	char const *brokerUser= getenv("AMQ_USERNAME");
+	char const *brokerPass= getenv("AMQ_PASSWORD");
+	char const *queueName= getenv("AMQ_QUEUE");
 	char const *localQueuePath= getenv("LOCALQUEUE_PATH");
 
 	bool jsonEnvelope= false;
 
 	int c;
-	while ((c= getopt(argc, argv, "S:U:P:Q:L:j")) != -1) {
+	while ((c= getopt(argc, argv, "S:U:P:Q:L:p:j")) != -1) {
 		switch (c) {
 		case 'p':
 			mllpPort= atoi(optarg);
