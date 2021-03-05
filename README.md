@@ -47,6 +47,12 @@ terminates the connection.
 
 This program opens a separate listening socket to natively support IPv6.
 
+## SSL Peer Validation
+
+The -i flag passes tells the ActiveMQ library to not perform standard peer
+validation.  This allows self-signed certificates, and may be necessary for
+wildcard certificates.
+
 ## Flags
 
 Configuration is done by command line flags, and if the command line flags
@@ -63,6 +69,7 @@ These flags can be used:
 | -Q {Queue Name} | ActiveMQ Queue to Send To               |
 | -L {Path}       | Local Directory for Store/Forward Mode  |
 | -j              | Enable JSON Envelope                    |
+| -i              | Disable SSL Peer Validation             |
 
 ## Environment Variables
 

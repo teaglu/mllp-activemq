@@ -26,15 +26,6 @@ int main(int argc, char* argv[])
 	OpenSSL_add_all_algorithms();
 	ERR_load_crypto_strings();
 
-	activemq::library::ActiveMQCPP::initializeLibrary();
-
-	// The activemq verifier doesn't trust wildcards for whatever
-	// reason, so this is necessary to connect to SSL.  This needs
-	// to be fixed for security.
-
-	decaf::lang::System::setProperty(
-		"decaf.net.ssl.disablePeerVerification", "true");
-
 	int mllpVersion= 2;
 	int mllpPort= 2575;
 
@@ -45,9 +36,10 @@ int main(int argc, char* argv[])
 	char const *localQueuePath= getenv("LOCALQUEUE_PATH");
 
 	bool jsonEnvelope= false;
+	bool peerValidation= true;
 
 	int c;
-	while ((c= getopt(argc, argv, "S:U:P:Q:L:p:j")) != -1) {
+	while ((c= getopt(argc, argv, "S:U:P:Q:L:p:ji")) != -1) {
 		switch (c) {
 		case 'p':
 			mllpPort= atoi(optarg);
@@ -82,24 +74,40 @@ int main(int argc, char* argv[])
 			jsonEnvelope= true;
 			break;
 
+		case 'i':
+			peerValidation= false;
+			break;
+
 		default:
 			fprintf(stderr, "Unknown argument %c\n", optopt);
 			exit(1);
 		}
 	}
 
-	bool valid= true;
-
 	if (brokerUri == NULL) {
 		Log::log(LOG_CRITICAL, "Broker URI not specified");
-		valid= false;
+		exit(1);
 	}
 	if (brokerUser == NULL) {
 		Log::log(LOG_CRITICAL, "Broker user not specified");
-		valid= false;
+		exit(1);
 	}
 
-	if (valid) {
+	activemq::library::ActiveMQCPP::initializeLibrary();
+
+	if (!peerValidation) {
+		// This is sometimes necessary because the activemq verifier
+		// doesn't trust wildcard certificates.  Until they fix that
+		// bug you have to disable peer validation to get that to work.
+
+		Log::log(LOG_WARNING, "Disabling SSL Peer Validation");
+
+		decaf::lang::System::setProperty(
+			"decaf.net.ssl.disablePeerVerification", "true");
+	}
+
+	// Block so everything gets de-rezzed before we shut the libs down
+	{
    		ServerRef amqServer= AmqServer::Create(
 			brokerUri, brokerUser, brokerPass, queueName, jsonEnvelope);
 		amqServer->start();
