@@ -20,12 +20,28 @@ MllpV2Connection::~MllpV2Connection()
 {
 }
 
+void MllpV2Connection::split(
+	std::string& line,
+	char separator,
+	std::vector<std::string>& parts)
+{
+	size_t start= 0;
+	for (size_t end= 0;
+		(end= line.find(separator, end)) != std::string::npos;
+		++end)
+	{
+		parts.push_back(line.substr(start, end - start));
+		start= end + 1;
+	}
+	parts.push_back(line.substr(start));
+}
+
 bool MllpV2Connection::parse(char const *message)
 {
 	bool accept= false;
 	std::string buffer= message;
 
-	if (buffer.length() < 6) {
+	if (buffer.length() < 9) {
 		Log::log(LOG_WARNING, "Message is too short");
 	} else if (buffer.substr(0, 4) != "MSH|") {
 		Log::log(LOG_WARNING, "Message does not start with MSH header");
@@ -35,22 +51,14 @@ bool MllpV2Connection::parse(char const *message)
 			Log::log(LOG_WARNING, "Unable to find end of message line");
 		} else {
 			std::string line= buffer.substr(0, lineOffset);
-			char separator= line.at(3);
+			char fieldDelim= line.at(3);
+			char componentDelim= line.at(4);
 
 			std::vector<std::string> fields;
+			split(line, fieldDelim, fields);
 
-			size_t start= 0;
-			for (size_t end= 0;
-				(end= line.find(separator, end)) != std::string::npos;
-				++end)
-			{
-				fields.push_back(line.substr(start, end - start));
-				start= end + 1;
-			}
-			fields.push_back(line.substr(start));
-
-			if (fields.size() < 10) {
-				Log::log(LOG_WARNING, "MSH line contains %d fields we need 10",
+			if (fields.size() < 12) {
+				Log::log(LOG_WARNING, "MSH line contains %d fields we need 12",
 					fields.size());
 
 				for (size_t i= 0; i < fields.size(); i++) {
@@ -64,6 +72,14 @@ bool MllpV2Connection::parse(char const *message)
 				toApp= fields.at(4);
 				toFacility= fields.at(5);
 				messageId= fields.at(9);
+
+				std::vector<std::string> components;
+				split(fields.at(8), componentDelim, components);
+				if (components.size() >= 2) {
+					eventType= components.at(1);
+				} else {
+					eventType= "R01";
+				}
 
 				accept= true;
 			}
@@ -92,7 +108,7 @@ void MllpV2Connection::acknowledge(AckType type)
 	std::string response;
 	response.append(1, 0x0B); // frame start
 
-	response.append("MSG|^~\\&|");
+	response.append("MSH|^~\\&|");
 	response.append(toApp);
 	response.append("|");
 	response.append(toFacility);
@@ -102,9 +118,11 @@ void MllpV2Connection::acknowledge(AckType type)
 	response.append(fromFacility);
 	response.append("|");
 	response.append(nowString);
-	response.append("||ACK^O01|");
+	response.append("||ACK^");
+	response.append(eventType);
+	response.append("|");
 	response.append(messageId);
-	response.append("|P|2.3\r");
+	response.append("|P|2.4\r");
 
 	response.append("MSA|");
 	switch (type) {

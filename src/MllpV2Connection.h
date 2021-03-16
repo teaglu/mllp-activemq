@@ -17,10 +17,14 @@ protected:
 private:
 	void sendResponse(bool success);
 
+	void split(std::string& line,
+		char delim, std::vector<std::string>& parts);
+
 	std::string fromApp;
 	std::string fromFacility;
 	std::string toApp;
 	std::string toFacility;
+	std::string eventType;
 	std::string messageId;
 };
 
